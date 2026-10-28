@@ -1,0 +1,54 @@
+package com.visionanalyzer.app.sensor
+
+import android.content.Context
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import com.visionanalyzer.app.data.AnalysisState
+import com.visionanalyzer.app.data.SensorSnapshot
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+
+class PhoneSensorMonitor(context: Context) {
+    private val sensorManager = context.getSystemService(SensorManager::class.java)
+
+    fun sensorFlow(): Flow<SensorSnapshot> = callbackFlow {
+        val listener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent?) {
+                if (event == null) return
+                val x = event.values.getOrNull(0)?.toDouble() ?: 0.0
+                val y = event.values.getOrNull(1)?.toDouble() ?: 0.0
+                val z = event.values.getOrNull(2)?.toDouble() ?: 0.0
+                val snapshot = SensorSnapshot(
+                    accelerometer = "${"%.2f".format(x)} / ${"%.2f".format(y)} / ${"%.2f".format(z)}",
+                    gyroscope = "${"%.2f".format(z)} rad/s",
+                    light = if (sensorManager is SensorManager) "${sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT)?.maximumRange ?: 0.0f}" else "N/A",
+                    motion = if (kotlin.math.abs(x) + kotlin.math.abs(y) + kotlin.math.abs(z) < 0.5) AnalysisState.LOW else AnalysisState.MEDIUM
+                )
+                trySend(snapshot)
+            }
+
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+        }
+
+        val accelerometer = (sensorManager as? SensorManager)?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        val gyroscope = (sensorManager as? SensorManager)?.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+        val light = (sensorManager as? SensorManager)?.getDefaultSensor(Sensor.TYPE_LIGHT)
+
+        if (accelerometer != null) {
+            sensorManager.registerListener(listener, accelerometer, SensorManager.SENSOR_DELAY_NORMAL)
+        }
+        if (gyroscope != null) {
+            sensorManager.registerListener(listener, gyroscope, SensorManager.SENSOR_DELAY_NORMAL)
+        }
+        if (light != null) {
+            sensorManager.registerListener(listener, light, SensorManager.SENSOR_DELAY_NORMAL)
+        }
+
+        awaitClose {
+            sensorManager?.unregisterListener(listener)
+        }
+    }
+}
